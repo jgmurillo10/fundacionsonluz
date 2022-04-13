@@ -7,7 +7,7 @@ module.exports = {
   manifestThemeColor: '#663399',
   manifestDisplay: 'standalone',
   manifestIcon: 'src/assets/img/website-icon.png',
-  pathPrefix: `/gatsby-starter-spectral/`, // This path is subpath of your hosting https://domain/portfolio
+  pathPrefix: `/fundacionsonluz/`, // This path is subpath of your hosting https://domain/portfolio
   heading: 'Fundación Son Luz',
   subHeading: 'Niños del mañana',
   // social
