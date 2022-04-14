@@ -23,6 +23,9 @@ export default function Footer() {
         <li>Cuenta de ahorros Bancolombia</li>
         <li>#411-000002-42</li>
       </ul>
+      <ul className="copyright">
+        <li>Desarrollado con ❤️ por <a target="_blank" href="https://juanmurillo.co/">Juan Murillo</a></li>
+      </ul>
     </footer>
   );
 }
