@@ -25,9 +25,9 @@ jobs:
       - name: Build
         run: gatsby build
       - uses: "finnp/create-file-action@master"
-          env:
-            FILE_NAME: "public/CNAME"
-            FILE_DATA: "fundacionsonluz.com"
+        env:
+          FILE_NAME: "public/CNAME"
+          FILE_DATA: "fundacionsonluz.com"
       - name: Deploy
         run: |
           git config --global user.name $user_name
