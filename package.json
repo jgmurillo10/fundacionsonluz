@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": ">=22 <25"
+    "node": ">=22.13 <25"
   },
   "packageManager": "npm@10.9.9",
   "dependencies": {
@@ -15,22 +15,29 @@
     "@tiptap/react": "3.32.0",
     "@tiptap/starter-kit": "3.32.0",
     "gsap": "3.14.2",
+    "iron-session": "9.0.1",
     "lucide-react": "0.468.0",
     "next": "16.4.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
+    "server-only": "0.0.1",
     "zod": "4.3.6"
   },
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0",
-    "lint": "eslint app components lib tests next.config.ts",
+    "lint": "eslint app components lib tests scripts cloudflare/worker.ts next.config.ts",
+    "cms:dev": "wrangler dev --ip 127.0.0.1",
+    "cms:setup": "node scripts/setup-local-cms.mjs",
+    "cms:smoke": "node --env-file=.env.local scripts/smoke-local-cms.mjs",
+    "cms:migrate:local": "wrangler d1 migrations apply sonluz-blog --local",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "format": "prettier --write app components lib tests next.config.ts tsconfig.json eslint.config.mjs package.json README.md .github/workflows/ci.yml"
+    "format": "prettier --write app components lib tests scripts cloudflare/worker.ts wrangler.jsonc next.config.ts tsconfig.json eslint.config.mjs package.json README.md .github/workflows/ci.yml"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "5.20261014.1",
     "@types/node": "22.19.11",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
@@ -38,7 +45,8 @@
     "eslint-config-next": "16.4.1",
     "prettier": "3.5.3",
     "typescript": "5.9.3",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "wrangler": "4.151.0"
   },
   "overrides": {
     "@tiptap/core": "3.32.0",

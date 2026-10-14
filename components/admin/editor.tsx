@@ -21,7 +21,8 @@ import {
   X,
 } from 'lucide-react';
 import { safeLink, type RichNode } from '@/lib/blog';
-import { prepareLocalImage } from '@/lib/image-upload';
+import { prepareEditorialImage } from '@/lib/editor-client';
+import { useRemoteEditor } from './editor-context';
 
 export function RichEditor({
   initial,
@@ -30,6 +31,7 @@ export function RichEditor({
   initial: RichNode;
   onChange: (document: RichNode) => void;
 }) {
+  const remote = useRemoteEditor();
   const [message, setMessage] = useState('');
   const [imageAlt, setImageAlt] = useState('');
   const [link, setLink] = useState('');
@@ -98,7 +100,7 @@ export function RichEditor({
     }
     setBusy(true);
     try {
-      const src = await prepareLocalImage(file);
+      const src = await prepareEditorialImage(file, remote);
       editor.chain().focus().setImage({ src, alt: imageAlt.trim() }).run();
       close();
     } catch (e) {

@@ -1,3 +1,7 @@
+.login-card form {
+  display: grid;
+  gap: 1rem;
+}
 .sr-only {
   position: absolute;
   width: 1px;

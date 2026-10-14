@@ -6,25 +6,38 @@ import { ArrowUpRight, FileText, Plus, Search, Download } from 'lucide-react';
 import { type Post, postDate } from '@/lib/blog';
 import { listLocalPosts, subscribeLocalPosts } from '@/lib/local-posts';
 import { Sun } from '../sun';
+import { useRemoteEditor } from './editor-context';
+import { listPosts } from '@/lib/editor-client';
 export function Dashboard() {
+  const remote = useRemoteEditor();
   const [posts, setPosts] = useState<Post[] | null>(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState('all');
   useEffect(() => {
-    const update = () => {
+    let active = true;
+    const update = async () => {
       try {
-        setPosts(listLocalPosts());
+        const loaded = remote ? await listPosts() : listLocalPosts();
+        if (!active) return;
+        setPosts(loaded);
         setError('');
       } catch (e) {
+        if (!active) return;
         setError(
           e instanceof Error ? e.message : 'No pudimos leer las entradas.'
         );
       }
     };
-    update();
-    return subscribeLocalPosts(update);
-  }, []);
+    void update();
+    const unsubscribe = subscribeLocalPosts(() => {
+      void update();
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [remote]);
   function exportPosts() {
     if (!posts) return;
     const url = URL.createObjectURL(
@@ -66,7 +79,7 @@ export function Dashboard() {
           <FileText size={20} />
         </div>
         <div>
-          <span>Publicadas en la vista previa</span>
+          <span>{remote ? 'Publicadas' : 'Publicadas en la vista previa'}</span>
           <strong>
             {posts?.filter((post) => post.status === 'published').length ?? '—'}
           </strong>
@@ -145,7 +158,11 @@ export function Dashboard() {
                   <span>Editada el {postDate(post.updatedAt)}</span>
                 </div>
                 <span className={`status-badge ${post.status}`}>
-                  {post.status === 'draft' ? 'Borrador' : 'Publicada · local'}
+                  {post.status === 'draft'
+                    ? 'Borrador'
+                    : remote
+                      ? 'Publicada'
+                      : 'Publicada · local'}
                 </span>
                 <ArrowUpRight size={18} />
               </Link>
@@ -177,9 +194,9 @@ export function Dashboard() {
       </section>
       <div className="admin-export">
         <p>
-          Antes de cambiar de navegador o borrar sus datos, exporta tus
-          entradas. Esta copia se podrá usar para la migración al blog
-          definitivo.
+          {remote
+            ? 'Puedes descargar una copia de las entradas. Las imágenes permanecen en el bucket privado y no se incluyen en esta exportación.'
+            : 'Antes de cambiar de navegador o borrar sus datos, exporta tus entradas. Esta copia se podrá usar para la migración al blog definitivo.'}
         </p>
         <button
           onClick={exportPosts}

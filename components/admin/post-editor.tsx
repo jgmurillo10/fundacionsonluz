@@ -1,6 +1,5 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- Local preview images have no externally fetchable URL. */
-/* eslint-disable react-hooks/set-state-in-effect -- Existing local drafts are loaded after browser hydration. */
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useEffect, useRef, useState } from 'react';
@@ -28,7 +27,13 @@ import {
   listLocalPosts,
   saveLocalPost,
 } from '@/lib/local-posts';
-import { prepareLocalImage } from '@/lib/image-upload';
+import {
+  deletePost,
+  getPost,
+  prepareEditorialImage,
+  savePost,
+} from '@/lib/editor-client';
+import { useRemoteEditor } from './editor-context';
 import { RichContent } from '../rich-content';
 const RichEditor = dynamic(
   () => import('./editor').then((module) => module.RichEditor),
@@ -39,6 +44,7 @@ const RichEditor = dynamic(
 );
 
 export function PostEditor({ id }: { id?: string }) {
+  const remote = useRemoteEditor();
   const router = useRouter();
   const [post, setPost] = useState<Post | null>(null);
   const [input, setInput] = useState<PostInput>(blankPost);
@@ -55,19 +61,31 @@ export function PostEditor({ id }: { id?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     if (!id) return;
-    try {
-      const found = listLocalPosts().find((item) => item.id === id);
-      if (!found) {
-        setError('No encontramos esta entrada. Puede que se haya eliminado.');
-        return;
+    let active = true;
+    void (async () => {
+      try {
+        const found = remote
+          ? await getPost(id)
+          : listLocalPosts().find((item) => item.id === id);
+        if (!active) return;
+        if (!found) {
+          setError('No encontramos esta entrada. Puede que se haya eliminado.');
+          return;
+        }
+        setPost(found);
+        setInput(found);
+        setLoaded(true);
+      } catch (e) {
+        if (!active) return;
+        setError(
+          e instanceof Error ? e.message : 'No pudimos abrir la entrada.'
+        );
       }
-      setPost(found);
-      setInput(found);
-      setLoaded(true);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'No pudimos abrir la entrada.');
-    }
-  }, [id]);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [id, remote]);
   useEffect(() => {
     if (!dirty) return;
     const unload = (e: BeforeUnloadEvent) => {
@@ -106,19 +124,25 @@ export function PostEditor({ id }: { id?: string }) {
     setDirty(true);
     setMessage('');
   }
-  function save(status = input.status) {
+  async function save(status = input.status) {
     setError('');
     setBusy(true);
     try {
-      const saved = saveLocalPost({ ...input, status }, post);
+      const saved = remote
+        ? await savePost({ ...input, status }, post)
+        : saveLocalPost({ ...input, status }, post);
       setPost(saved);
       setInput(saved);
       setDirty(false);
       setSlugEdited(true);
       setMessage(
-        status === 'published'
-          ? 'Entrada guardada en el blog de vista previa local.'
-          : 'Borrador guardado en este navegador.'
+        remote
+          ? status === 'published'
+            ? 'Entrada publicada. Tus cambios están guardados.'
+            : 'Borrador guardado.'
+          : status === 'published'
+            ? 'Entrada guardada en el blog de vista previa local.'
+            : 'Borrador guardado en este navegador.'
       );
       if (!id) router.replace(`/admin/posts/${saved.id}`);
       dialog.current?.close();
@@ -137,10 +161,12 @@ export function PostEditor({ id }: { id?: string }) {
     setConfirm(kind);
     dialog.current?.showModal();
   }
-  function confirmAction() {
+  async function confirmAction() {
     if (confirm === 'delete' && post) {
+      setBusy(true);
       try {
-        deleteLocalPost(post);
+        if (remote) await deletePost(post);
+        else deleteLocalPost(post);
         setDirty(false);
         dialog.current?.close();
         router.push('/admin');
@@ -149,15 +175,17 @@ export function PostEditor({ id }: { id?: string }) {
           e instanceof Error ? e.message : 'No pudimos eliminar la entrada.'
         );
         dialog.current?.close();
+      } finally {
+        setBusy(false);
       }
-    } else save(confirm === 'publish' ? 'published' : 'draft');
+    } else await save(confirm === 'publish' ? 'published' : 'draft');
   }
   async function cover(file?: File) {
     if (!file) return;
     setBusy(true);
     setError('');
     try {
-      update('coverImage', await prepareLocalImage(file));
+      update('coverImage', await prepareEditorialImage(file, remote));
     } catch (e) {
       setError(
         e instanceof Error ? e.message : 'No pudimos cargar la portada.'
@@ -184,7 +212,11 @@ export function PostEditor({ id }: { id?: string }) {
           <ArrowLeft size={15} /> Todas las entradas
         </Link>
         <span className={`status-badge ${input.status}`}>
-          {input.status === 'published' ? 'Publicada · local' : 'Borrador'}
+          {input.status === 'published'
+            ? remote
+              ? 'Publicada'
+              : 'Publicada · local'
+            : 'Borrador'}
         </span>
       </div>
       <header className="admin-page-heading editor-heading">
@@ -198,7 +230,9 @@ export function PostEditor({ id }: { id?: string }) {
             {dirty
               ? 'Tienes cambios sin guardar.'
               : post
-                ? 'Tus cambios están guardados en este navegador.'
+                ? remote
+                  ? 'Tus cambios están guardados.'
+                  : 'Tus cambios están guardados en este navegador.'
                 : 'Escribe a tu ritmo. Puedes guardar y continuar después.'}
           </p>
         </div>
@@ -232,8 +266,12 @@ export function PostEditor({ id }: { id?: string }) {
           disabled={busy}
         >
           {input.status === 'published'
-            ? 'Retirar de la vista previa'
-            : 'Publicar en vista previa'}
+            ? remote
+              ? 'Volver a borrador'
+              : 'Retirar de la vista previa'
+            : remote
+              ? 'Publicar entrada'
+              : 'Publicar en vista previa'}
           <ArrowUpRight size={16} />
         </button>
       </div>
@@ -426,10 +464,12 @@ export function PostEditor({ id }: { id?: string }) {
         </h2>
         <p>
           {confirm === 'delete'
-            ? 'Esta acción elimina la entrada guardada en este navegador y no se puede deshacer. Puedes exportar una copia desde el panel antes de eliminarla.'
+            ? 'Esta acción elimina la entrada y no se puede deshacer. Puedes exportar una copia desde el panel antes de eliminarla.'
             : confirm === 'publish'
-              ? 'La entrada aparecerá en el blog de vista previa de este navegador. Todavía no se publicará en Internet.'
-              : 'La entrada dejará de aparecer en el blog de vista previa, pero podrás seguir editándola.'}
+              ? remote
+                ? 'La entrada aparecerá en el blog público de este entorno. Revisa el contenido y las imágenes antes de confirmar.'
+                : 'La entrada aparecerá en el blog de vista previa de este navegador. Todavía no se publicará en Internet.'
+              : 'La entrada dejará de aparecer en el blog, pero podrás seguir editándola.'}
         </p>
         <div className="button-row">
           <button

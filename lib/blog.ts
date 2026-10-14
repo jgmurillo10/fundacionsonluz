@@ -21,6 +21,7 @@ export type Post = {
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
+  revision?: number;
 };
 export type PostInput = Pick<
   Post,
@@ -191,6 +192,7 @@ export const storedPostSchema = z.intersection(
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     publishedAt: z.iso.datetime().nullable(),
+    revision: z.number().int().positive().optional(),
   })
 );
 export function postDate(date: string) {

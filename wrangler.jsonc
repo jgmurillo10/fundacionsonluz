@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sonluz-blog-api",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-13",
+  "workers_dev": false,
+  "ratelimits": [
+    {
+      "name": "LOGIN_RATE_LIMITER",
+      "namespace_id": "1792007276",
+      "simple": { "limit": 5, "period": 60 },
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "BLOG_DB",
+      "database_name": "sonluz-blog",
+      "database_id": "e0f1827b-ee41-4029-a7c7-392d31dbc12b",
+      "migrations_dir": "cloudflare/migrations",
+    },
+  ],
+  "r2_buckets": [{ "binding": "BLOG_MEDIA", "bucket_name": "sonluz-media" }],
+}
