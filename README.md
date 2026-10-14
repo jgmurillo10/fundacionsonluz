@@ -47,6 +47,8 @@ npm run build
 
 Los tests comprueban fidelidad de texto y fotografías, enlaces y formatos seguros, publicación/borradores, direcciones únicas, conflictos entre pestañas, errores de almacenamiento y desactivación del sandbox en producción. No envían mensajes reales por EmailJS.
 
+La auditoría de dependencias de producción (`npm audit --omit=dev`) no detecta vulnerabilidades. La auditoría completa aún informa una [vulnerabilidad de recursión en braces](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), transitiva del linter de desarrollo, sin versión corregida disponible. No se han desactivado comprobaciones ni aplicado una degradación incompatible para ocultarla. Tiptap se fija a una misma versión en todas sus extensiones y Vitest usa Vite 7 para mantener reproducible la instalación con npm 10.
+
 ## Estructura
 
 - `app/(site)`: sitio público y blog.
