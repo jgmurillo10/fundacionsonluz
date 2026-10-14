@@ -56,7 +56,7 @@ export function AdminShell({
           </Link>
           {remote && !sandbox && (
             <button
-              className="admin-return"
+              className="admin-return admin-logout"
               onClick={async () => {
                 setError('');
                 try {
