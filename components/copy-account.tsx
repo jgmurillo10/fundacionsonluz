@@ -16,7 +16,11 @@ export function CopyAccount() {
   }
   return (
     <div>
-      <button onClick={copy} className="copy-account">
+      <button
+        onClick={copy}
+        className="copy-account"
+        data-analytics="account_copy"
+      >
         {message === 'Número copiado' ? (
           <Check size={17} />
         ) : (

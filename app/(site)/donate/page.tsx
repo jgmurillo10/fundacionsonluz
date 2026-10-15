@@ -49,7 +49,11 @@ export default function Donate() {
             Si quieres donar algo distinto a dinero o aun no estás seguro de en
             qué se va a utilizar tu donación, contáctanos!
           </p>
-          <Link href="/contact" className="button button-green">
+          <Link
+            href="/contact"
+            className="button button-green"
+            data-analytics="donate_contact"
+          >
             Contáctanos <ArrowUpRight size={18} />
           </Link>
         </div>

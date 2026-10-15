@@ -7,7 +7,11 @@ export function Footer() {
     <footer className="site-footer">
       <div className="footer-top">
         <div>
-          <Link href="/" className="brand footer-brand">
+          <Link
+            href="/"
+            className="brand footer-brand"
+            data-analytics="footer_home"
+          >
             <Sun className="brand-sun" />
             <span>
               <small>FUNDACIÓN</small>
@@ -18,7 +22,11 @@ export function Footer() {
         </div>
         <div>
           <span className="eyebrow">Hablemos</span>
-          <a href={`mailto:${foundation.email}`} className="footer-email">
+          <a
+            href={`mailto:${foundation.email}`}
+            className="footer-email"
+            data-analytics="footer_email"
+          >
             {foundation.email}
             <ArrowUpRight size={18} />
           </a>
@@ -31,7 +39,11 @@ export function Footer() {
             <br />
             <strong>#{foundation.account}</strong>
           </p>
-          <Link href="/donate" className="text-link">
+          <Link
+            href="/donate"
+            className="text-link"
+            data-analytics="footer_donate"
+          >
             Cómo donar <ArrowUpRight size={16} />
           </Link>
         </div>
@@ -42,6 +54,7 @@ export function Footer() {
           Desarrollado con cariño por{' '}
           <a
             href="https://juanmurillo.co/"
+            data-analytics="footer_developer"
             target="_blank"
             rel="noopener noreferrer"
           >

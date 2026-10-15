@@ -60,6 +60,26 @@ Las imágenes se validan como JPG, PNG o WebP, se decodifican en el navegador y 
 
 Eliminar una entrada quita sus referencias y su acceso público, pero no borra automáticamente el objeto R2: una imagen puede estar compartida por otra entrada. No hay purga automática de archivos huérfanos en esta entrega. El sandbox tiene almacenamiento limitado; exporta antes de limpiar datos o cambiar de navegador. La exportación JSON no es un respaldo de los archivos R2 ni incluye importación automática.
 
+## Analítica de la web pública
+
+Integración opcional con [Umami](https://umami.is/), independiente de Vercel y del backend D1/R2. Las estadísticas se consultan en el dashboard de Umami, no en el editor. Se cuentan vistas de `/`, `/about`, `/donate`, `/contact`, `/blog` y artículos, incluidas las transiciones Next.js sin recarga. Los controles marcados con `data-analytics` envían nombres estables: navegación de escritorio/móvil, abrir/cerrar menú, enlaces de donar/contactar, copiar cuenta, botón de contacto, correo, abrir artículos y volver al blog.
+
+Los eventos representan **clics**, no donaciones completadas, copias exitosas ni mensajes entregados. No se envían valores del formulario, textos de botones, títulos de artículos, direcciones de enlaces, parámetros de URL, hashes, referrers ni identificadores personalizados. No se usan cookies analíticas, `identify`, grabación de sesiones ni seguimiento automático. Umami procesa los datos y metadatos de las solicitudes según su política; esto no implica que ningún dato técnico llegue al proveedor.
+
+El tracker solo se monta en el layout público, nunca en `/admin`, login, APIs o vistas previas del editor. Cada envío vuelve a comprobar ruta, dominio y privacidad, incluso si el script quedó cargado antes de entrar al administrador. Respeta Do Not Track, Global Privacy Control y `localStorage.setItem('umami.disabled', '1')`; para volver a habilitarlo elimina esa clave y recarga. Errores o bloqueadores del tracker no impiden navegar, copiar la cuenta ni enviar el formulario.
+
+Para activarlo cuando se apruebe el despliegue:
+
+1. Crear una cuenta [Umami Cloud](https://cloud.umami.is/signup) o usar una instancia propia y registrar el sitio. Elegir el plan conscientemente, sin activar un trial de pago automáticamente; [precios y cuotas](https://umami.is/pricing).
+2. Configurar `SONLUZ_UMAMI_WEBSITE_ID` con el UUID de ese sitio (es público, no una contraseña ni API key).
+3. Dejar `SONLUZ_UMAMI_SCRIPT_URL` vacío para `https://cloud.umami.is/script.js`, o configurar la URL HTTPS del tracker de la instancia propia.
+4. Mantener `NEXT_PUBLIC_SITE_URL` como dominio público canónico. Solo se admite ese hostname y su variante `www`; localhost y previews no envían eventos. La integración está desactivada en desarrollo o si falta el ID.
+5. Compilar/desplegar con esas variables y comprobar vistas y eventos en el dashboard. No configurar auto-tracking ni sustituir la integración por el snippet automático del proveedor: las exclusiones dependen de envíos explícitos filtrados.
+
+No se ha creado ninguna cuenta, activado un plan ni conectado una propiedad real. No se ha modificado la web existente en GitHub Pages. Las pruebas usan un tracker simulado y no envían estadísticas reales. Para pruebas controladas fuera de producción, usar un ID separado y un dominio de prueba HTTPS explícito, nunca mezclar datos de fixture con el sitio real.
+
+Documentación consultada: [configuración del tracker](https://umami.is/docs/tracker-configuration) y [envíos manuales](https://umami.is/docs/tracker-functions).
+
 ## Calidad
 
 ```sh

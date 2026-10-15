@@ -74,6 +74,7 @@ export function ContactForm() {
       <button
         className="button button-green"
         type="submit"
+        data-analytics="contact_submit"
         disabled={status === 'sending' || status === 'sent'}
       >
         {status === 'sent'
@@ -89,7 +90,13 @@ export function ContactForm() {
         {status === 'error' && (
           <>
             No pudimos enviar el mensaje. Inténtalo de nuevo o escríbenos a{' '}
-            <a href={`mailto:${foundation.email}`}>{foundation.email}</a>.
+            <a
+              href={`mailto:${foundation.email}`}
+              data-analytics="contact_fallback_email"
+            >
+              {foundation.email}
+            </a>
+            .
           </>
         )}
       </div>

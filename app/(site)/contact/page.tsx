@@ -33,6 +33,7 @@ export default function Contact() {
           <a
             href={`mailto:${foundation.email}`}
             className="text-link contact-email"
+            data-analytics="contact_email"
           >
             {foundation.email} <ArrowUpRight size={17} />
           </a>

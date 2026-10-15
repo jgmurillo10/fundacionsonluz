@@ -22,7 +22,7 @@ export function BlogArticle({ post }: { post: Post }) {
       <article className="article-body">
         <RichContent document={post.content} />
         <div className="article-back">
-          <Link href="/blog" className="text-link">
+          <Link href="/blog" className="text-link" data-analytics="blog_back">
             <ArrowLeft size={16} /> Todas las historias
           </Link>
         </div>

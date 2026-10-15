@@ -6,7 +6,7 @@ import { Sun } from './sun';
 export function BlogCard({ post }: { post: Post }) {
   return (
     <article className="blog-card">
-      <Link href={`/blog/${post.slug}`}>
+      <Link href={`/blog/${post.slug}`} data-analytics="blog_read">
         <div className="blog-card-photo">
           {safeImage(post.coverImage) ? (
             <img src={post.coverImage} alt={post.coverAlt} loading="lazy" />

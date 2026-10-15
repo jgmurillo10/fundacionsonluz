@@ -5,10 +5,10 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Menu, X } from 'lucide-react';
 import { Sun } from './sun';
 const links = [
-  { href: '/', label: 'Inicio' },
-  { href: '/about', label: 'Nosotros' },
-  { href: '/blog', label: 'Nuestro blog' },
-  { href: '/contact', label: 'Contacto' },
+  { href: '/', label: 'Inicio', analytics: 'home' },
+  { href: '/about', label: 'Nosotros', analytics: 'about' },
+  { href: '/blog', label: 'Nuestro blog', analytics: 'blog' },
+  { href: '/contact', label: 'Contacto', analytics: 'contact' },
 ];
 export function Navigation() {
   const pathname = usePathname();
@@ -25,7 +25,12 @@ export function Navigation() {
   };
   return (
     <header className="site-header">
-      <Link href="/" className="brand" aria-label="Fundación Son Luz, inicio">
+      <Link
+        href="/"
+        className="brand"
+        aria-label="Fundación Son Luz, inicio"
+        data-analytics="nav_home"
+      >
         <Sun className="brand-sun" />
         <span>
           <small>FUNDACIÓN</small>
@@ -38,6 +43,7 @@ export function Navigation() {
         {links.map((link) => (
           <Link
             key={link.href}
+            data-analytics={`nav_${link.analytics}`}
             href={link.href}
             aria-current={pathname === link.href ? 'page' : undefined}
           >
@@ -45,11 +51,16 @@ export function Navigation() {
           </Link>
         ))}
       </nav>
-      <Link href="/donate" className="button button-green header-donate">
+      <Link
+        href="/donate"
+        className="button button-green header-donate"
+        data-analytics="donate_header"
+      >
         Haz tu donación <ArrowUpRight size={16} />
       </Link>
       <button
         className="menu-toggle"
+        data-analytics="menu_open"
         ref={toggle}
         onClick={() => setOpen(true)}
         aria-label="Abrir menú"
@@ -67,7 +78,12 @@ export function Navigation() {
           if (e.target === dialog.current) close();
         }}
       >
-        <button className="menu-close" onClick={close} aria-label="Cerrar menú">
+        <button
+          className="menu-close"
+          onClick={close}
+          aria-label="Cerrar menú"
+          data-analytics="menu_close"
+        >
           <X />
         </button>
         <Sun className="mobile-sun" />
@@ -75,6 +91,7 @@ export function Navigation() {
           {links.map((link) => (
             <Link
               key={link.href}
+              data-analytics={`mobile_nav_${link.analytics}`}
               href={link.href}
               onClick={close}
               aria-current={pathname === link.href ? 'page' : undefined}
@@ -82,7 +99,7 @@ export function Navigation() {
               {link.label}
             </Link>
           ))}
-          <Link href="/donate" onClick={close}>
+          <Link href="/donate" onClick={close} data-analytics="donate_mobile">
             Haz tu donación <ArrowUpRight size={24} />
           </Link>
         </nav>

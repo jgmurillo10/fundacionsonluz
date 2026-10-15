@@ -22,13 +22,18 @@ export default function Home() {
           </h1>
           <p data-hero-reveal>{foundation.purpose}</p>
           <div className="button-row" data-hero-reveal>
-            <Link href="/about" className="button button-green">
+            <Link
+              href="/about"
+              className="button button-green"
+              data-analytics="home_about"
+            >
               Conoce nuestra fundación <ArrowUpRight size={18} />
             </Link>
             <a
               href="#proposito"
               className="round-link"
               aria-label="Explorar nuestro propósito"
+              data-analytics="home_purpose"
             >
               <ArrowDown size={20} />
             </a>
@@ -88,7 +93,11 @@ export default function Home() {
             La luz de <em>cada familia.</em>
           </h2>
           <p>{foundation.introduction}</p>
-          <Link href="/about" className="text-link">
+          <Link
+            href="/about"
+            className="text-link"
+            data-analytics="home_mission"
+          >
             Conoce nuestra misión y visión <ArrowUpRight size={18} />
           </Link>
         </div>
@@ -147,7 +156,7 @@ export default function Home() {
         </div>
         <div>
           <p>Noticias, encuentros e historias de nuestra fundación.</p>
-          <Link href="/blog" className="text-link">
+          <Link href="/blog" className="text-link" data-analytics="home_blog">
             Visita nuestro blog <ArrowUpRight size={18} />
           </Link>
         </div>

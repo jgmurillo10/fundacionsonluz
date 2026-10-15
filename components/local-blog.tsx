@@ -23,7 +23,7 @@ export function BlogEmpty() {
         Aquí compartiremos noticias, encuentros e historias de la Fundación Son
         Luz.
       </p>
-      <Link href="/contact" className="text-link">
+      <Link href="/contact" className="text-link" data-analytics="blog_contact">
         Mantengamos el contacto <ArrowUpRight size={16} />
       </Link>
     </div>
@@ -72,7 +72,7 @@ export function LocalBlog({ slug }: { slug?: string }) {
               <br />
               <em>no está publicada.</em>
             </h2>
-            <Link href="/blog" className="text-link">
+            <Link href="/blog" className="text-link" data-analytics="blog_back">
               Volver al blog <ArrowLeft size={16} />
             </Link>
           </div>
@@ -96,7 +96,7 @@ export function LocalBlog({ slug }: { slug?: string }) {
         <article className="article-body">
           <RichContent document={post.content} />
           <div className="article-back">
-            <Link href="/blog" className="text-link">
+            <Link href="/blog" className="text-link" data-analytics="blog_back">
               <ArrowLeft size={16} /> Todas las historias
             </Link>
           </div>

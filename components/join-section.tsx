@@ -13,10 +13,18 @@ export function JoinSection() {
         </h2>
         <p>{foundation.invitation}</p>
         <div className="button-row">
-          <Link href="/donate" className="button button-yellow">
+          <Link
+            href="/donate"
+            className="button button-yellow"
+            data-analytics="join_donate"
+          >
             Donar <ArrowUpRight size={18} />
           </Link>
-          <Link href="/contact" className="button button-outline-light">
+          <Link
+            href="/contact"
+            className="button button-outline-light"
+            data-analytics="join_contact"
+          >
             Contactar <ArrowUpRight size={18} />
           </Link>
         </div>
