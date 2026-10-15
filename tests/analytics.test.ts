@@ -4,6 +4,7 @@ vi.mock('server-only', () => ({}));
 import {
   analyticsAllowed,
   filterAnalyticsPayload,
+  parseAnalyticsEvent,
   publicAnalyticsPath,
   trackPublicClick,
   trackPublicPage,
@@ -11,24 +12,18 @@ import {
 } from '../lib/analytics';
 import { analyticsConfig } from '../lib/server/analytics';
 
-const websiteId = '94db1cb1-74f4-4a40-ad6c-962362670409';
 const origin = 'https://fundacionsonluz.com';
 const config: AnalyticsConfig = {
-  websiteId,
-  scriptUrl: 'https://cloud.umami.is/script.js',
   domains: ['fundacionsonluz.com', 'www.fundacionsonluz.com'],
 };
 const track = vi.fn();
 const storage = new Map<string, string>();
-
 function navigate(path: string, base = origin) {
   Object.defineProperty(window, 'location', {
     value: new URL(path, base),
-    writable: true,
     configurable: true,
   });
 }
-
 class Control {
   disabled = false;
   constructor(
@@ -45,76 +40,67 @@ class Control {
     return this.attrs[key] ?? null;
   }
 }
-
-function click(control: Control) {
-  return trackPublicClick(config, { target: control } as unknown as MouseEvent);
-}
-
+const click = (target: Control) =>
+  trackPublicClick(config, { target } as unknown as MouseEvent);
 beforeEach(() => {
-  track.mockReset();
+  track.mockReset().mockResolvedValue(new Response(null, { status: 204 }));
   storage.clear();
+  vi.stubGlobal('fetch', track);
   vi.stubGlobal('window', {
     location: new URL(origin),
     localStorage: { getItem: (key: string) => storage.get(key) ?? null },
-    umami: { track },
   });
   vi.stubGlobal('navigator', { doNotTrack: '0', globalPrivacyControl: false });
   vi.stubGlobal('Element', Control);
   vi.stubEnv('NODE_ENV', 'production');
   vi.stubEnv('NEXT_PUBLIC_SITE_URL', origin);
-  vi.stubEnv('SONLUZ_UMAMI_WEBSITE_ID', websiteId);
-  vi.stubEnv('SONLUZ_UMAMI_SCRIPT_URL', '');
+  vi.stubEnv('SONLUZ_ANALYTICS_ENABLED', '1');
+  vi.stubEnv('SONLUZ_CMS_URL', 'https://cms.example.test');
+  vi.stubEnv('SONLUZ_WORKER_SECRET', 's'.repeat(32));
 });
-
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
 });
+function payload() {
+  return JSON.parse(track.mock.calls.at(-1)![1].body);
+}
 
-describe('analytics configuration and route isolation', () => {
-  it('requires an explicit website ID and production mode', () => {
+describe('Cloudflare public analytics configuration and routing', () => {
+  it('requires production, an explicit flag, a valid production domain and configured Worker', () => {
     expect(analyticsConfig()).toEqual(config);
-    vi.stubEnv('SONLUZ_UMAMI_WEBSITE_ID', '');
-    expect(analyticsConfig()).toBeNull();
-    vi.stubEnv('SONLUZ_UMAMI_WEBSITE_ID', 'not-an-id');
-    expect(analyticsConfig()).toBeNull();
-    vi.stubEnv('SONLUZ_UMAMI_WEBSITE_ID', websiteId);
-    vi.stubEnv('NODE_ENV', 'development');
-    expect(analyticsConfig()).toBeNull();
-  });
-
-  it('accepts HTTPS self-hosted Umami without exposing any credentials', () => {
-    vi.stubEnv(
-      'SONLUZ_UMAMI_SCRIPT_URL',
-      'https://stats.example.com/script.js'
-    );
-    expect(analyticsConfig()?.scriptUrl).toBe(
-      'https://stats.example.com/script.js'
-    );
-    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://www.fundacionsonluz.com');
-    expect(analyticsConfig()?.domains).toEqual(config.domains);
-  });
-
-  it.each([
-    'http://stats.example.com/script.js',
-    'https://user:password@stats.example.com/script.js',
-    'https://stats.example.com/script.js?secret=value',
-    'https://stats.example.com/script.js#hash',
-    'https://stats.example.com:444/script.js',
-    'javascript:alert(1)',
-  ])('rejects an unsafe tracker URL: %s', (value) => {
-    vi.stubEnv('SONLUZ_UMAMI_SCRIPT_URL', value);
-    expect(analyticsConfig()).toBeNull();
-  });
-
-  it.each(['http://localhost:3005', 'https://localhost', 'https://127.0.0.1'])(
-    'does not configure a localhost site: %s',
-    (value) => {
-      vi.stubEnv('NEXT_PUBLIC_SITE_URL', value);
+    for (const flag of ['0', 'true', '']) {
+      vi.stubEnv('SONLUZ_ANALYTICS_ENABLED', flag);
       expect(analyticsConfig()).toBeNull();
     }
-  );
-
+    vi.stubEnv('SONLUZ_ANALYTICS_ENABLED', '1');
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(analyticsConfig()).toBeNull();
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('SONLUZ_WORKER_SECRET', '');
+    expect(analyticsConfig()).toBeNull();
+  });
+  it.each([
+    'http://localhost:3005',
+    'https://localhost',
+    'https://127.0.0.1',
+    'https://127.0.0.2',
+    'https://sub.localhost',
+    'https://[::1]',
+    'https://user:pass@example.com',
+    `${origin}/?private=yes`,
+    `${origin}/#private`,
+    `${origin}:444`,
+    `${origin}/admin`,
+    'invalid',
+  ])('rejects unsafe site configuration: %s', (value) => {
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', value);
+    expect(analyticsConfig()).toBeNull();
+  });
+  it('normalizes www configuration', () => {
+    vi.stubEnv('NEXT_PUBLIC_SITE_URL', 'https://www.fundacionsonluz.com');
+    expect(analyticsConfig()).toEqual(config);
+  });
   it.each([
     '/',
     '/about',
@@ -123,29 +109,27 @@ describe('analytics configuration and route isolation', () => {
     '/blog',
     '/blog/una-historia',
     '/blog/una-historia/',
-  ])('tracks public routes only: %s', (path) => {
+  ])('counts public routes: %s', (path) => {
     navigate(path);
     expect(trackPublicPage(config, path)).toBe(true);
-    expect(track).toHaveBeenCalledOnce();
-    expect(track).toHaveBeenCalledWith({
-      website: websiteId,
-      hostname: 'fundacionsonluz.com',
-      url: path.replace(/\/$/, '') || '/',
+    expect(payload()).toEqual({
+      type: 'pageview',
+      path: path.replace(/\/$/, '') || '/',
     });
+    expect(track).toHaveBeenCalledOnce();
   });
-
   it.each([
     '/admin',
     '/admin/login',
     '/admin/posts/new',
-    '/admin/posts/private-id',
     '/api/editor/posts',
-    '/auth/callback',
+    '/api/analytics',
     '/media/key',
+    '/auth/callback',
     '/%61dmin',
     '/blog/a/b',
     '/unknown',
-  ])('cannot track private/non-site routes: %s', (path) => {
+  ])('excludes non-public routes: %s', (path) => {
     expect(publicAnalyticsPath(path, origin)).toBeNull();
     navigate(path);
     expect(analyticsAllowed(config)).toBe(false);
@@ -155,181 +139,132 @@ describe('analytics configuration and route isolation', () => {
     );
     expect(track).not.toHaveBeenCalled();
   });
-
-  it('blocks private and external payload URLs even on a public page', () => {
-    expect(trackPublicPage(config, '/admin/login?email=secret')).toBe(false);
+  it('blocks delayed events after entering admin and forged private/external paths', () => {
+    expect(trackPublicPage(config, '/admin/login?email=private')).toBe(false);
     expect(trackPublicPage(config, 'https://other.example/about')).toBe(false);
-    expect(track).not.toHaveBeenCalled();
-  });
-
-  it('cannot send delayed events after navigating into admin', () => {
     expect(trackPublicPage(config, '/')).toBe(true);
-    navigate('/admin/login');
-    expect(
-      filterAnalyticsPayload(config, 'event', {
-        url: '/',
-        name: 'donate_header',
-      })
-    ).toBe(false);
+    navigate('/admin');
     expect(trackPublicPage(config, '/')).toBe(false);
     expect(track).toHaveBeenCalledOnce();
   });
-
-  it('counts public navigation, return visits and blog pages without tracking admin', () => {
+  it('counts public return visits and accepts www', () => {
     for (const path of [
       '/',
       '/about',
       '/blog',
-      '/blog/una-historia',
+      '/blog/historia',
       '/about',
       '/',
     ]) {
       navigate(path);
       expect(trackPublicPage(config, path)).toBe(true);
     }
-    expect(track).toHaveBeenCalledTimes(6);
-    navigate('/admin');
-    expect(trackPublicPage(config, '/admin')).toBe(false);
-    navigate('/');
+    navigate('/', 'https://www.fundacionsonluz.com');
     expect(trackPublicPage(config, '/')).toBe(true);
     expect(track).toHaveBeenCalledTimes(7);
   });
-});
-
-describe('analytics privacy and public interactions', () => {
-  it('drops queries, hashes, referrers, titles, form values and identity data', () => {
-    navigate('/contact?email=visitor@example.test#private');
-    const payload = filterAnalyticsPayload(config, 'event', {
-      url: window.location.href,
-      name: 'contact_submit',
-      website: 'other',
-      hostname: 'other',
-      referrer: 'https://example.com/?token=private',
-      title: 'Private title',
-      data: {
-        email: 'visitor@example.test',
-        phone: '123',
-        message: 'Private message',
-      },
-      id: 'visitor-id',
-      tag: 'private-tag',
-    });
-    expect(payload).toEqual({
-      website: websiteId,
-      hostname: 'fundacionsonluz.com',
-      url: '/contact',
-      name: 'contact_submit',
-    });
-    expect(
-      filterAnalyticsPayload(config, 'identify', {
-        url: '/contact',
-        id: 'visitor-id',
-      })
-    ).toBe(false);
-    expect(
-      filterAnalyticsPayload(config, 'event', {
-        url: '/contact',
-        name: 'visitor@example.test',
-      })
-    ).toBe(false);
-  });
-
-  it.each(['1', 'yes'])('respects Do Not Track: %s', (value) => {
-    vi.stubGlobal('navigator', { doNotTrack: value });
-    expect(analyticsAllowed(config)).toBe(false);
-    expect(trackPublicPage(config, '/')).toBe(false);
-    expect(track).not.toHaveBeenCalled();
-  });
-
-  it('respects Global Privacy Control and opt-out changes after loading', () => {
-    expect(trackPublicPage(config, '/')).toBe(true);
-    vi.stubGlobal('navigator', { globalPrivacyControl: true });
-    expect(trackPublicPage(config, '/')).toBe(false);
-    vi.stubGlobal('navigator', {});
-    storage.set('umami.disabled', '1');
-    expect(trackPublicPage(config, '/')).toBe(false);
-    expect(track).toHaveBeenCalledOnce();
-  });
-
-  it('fails closed when privacy storage is inaccessible', () => {
-    window.localStorage.getItem = () => {
-      throw new Error('Storage blocked');
-    };
-    expect(analyticsAllowed(config)).toBe(false);
-    expect(trackPublicPage(config, '/')).toBe(false);
-  });
-
   it.each([
     'http://localhost:3005',
     'https://preview.devinapps.com',
     'https://sonluz.vercel.app',
-  ])('does not send from local or preview hosts: %s', (host) => {
+  ])('excludes local/preview hosts: %s', (host) => {
     navigate('/', host);
     expect(trackPublicPage(config, '/')).toBe(false);
     expect(track).not.toHaveBeenCalled();
   });
+});
 
-  it('supports the public www domain', () => {
-    navigate('/', 'https://www.fundacionsonluz.com');
+describe('privacy and transport', () => {
+  it('strips queries, hashes, form values, referrers and arbitrary identity data', () => {
+    navigate('/contact?email=private@example.test#private');
+    expect(
+      filterAnalyticsPayload(config, {
+        type: 'click',
+        path: window.location.href,
+        action: 'contact_submit',
+        referrer: 'https://private.example',
+        email: 'private@example.test',
+        data: { message: 'Private message' },
+        title: 'Private title',
+        id: 'visitor',
+      })
+    ).toEqual({ type: 'click', path: '/contact', action: 'contact_submit' });
+    expect(trackPublicPage(config, window.location.href)).toBe(true);
+    expect(track).toHaveBeenCalledWith(
+      '/api/analytics',
+      expect.objectContaining({
+        credentials: 'omit',
+        mode: 'same-origin',
+        keepalive: true,
+        referrer: `${origin}/contact`,
+        referrerPolicy: 'same-origin',
+        body: JSON.stringify({ type: 'pageview', path: '/contact' }),
+      })
+    );
+    expect(JSON.stringify(track.mock.calls)).not.toMatch(
+      /private|cookie|authorization|umami/i
+    );
+  });
+  it.each(['1', 'yes'])('honors DNT: %s', (doNotTrack) => {
+    vi.stubGlobal('navigator', { doNotTrack });
+    expect(trackPublicPage(config, '/')).toBe(false);
+    expect(track).not.toHaveBeenCalled();
+  });
+  it('honors GPC and both new and legacy local opt-outs after loading', () => {
     expect(trackPublicPage(config, '/')).toBe(true);
-    expect(track.mock.calls[0][0].hostname).toBe('www.fundacionsonluz.com');
+    vi.stubGlobal('navigator', { globalPrivacyControl: true });
+    expect(trackPublicPage(config, '/')).toBe(false);
+    vi.stubGlobal('navigator', {});
+    for (const key of ['sonluz.analytics.disabled', 'umami.disabled']) {
+      storage.set(key, '1');
+      expect(trackPublicPage(config, '/')).toBe(false);
+      storage.delete(key);
+    }
+    expect(track).toHaveBeenCalledOnce();
   });
-
-  it('records a named click on nested button/icon content, without reading text', () => {
+  it('fails closed when storage cannot be read', () => {
+    window.localStorage.getItem = () => {
+      throw new Error('Blocked');
+    };
+    expect(trackPublicPage(config, '/')).toBe(false);
+  });
+  it('tracks marked nested controls without copying their contents or destinations', () => {
     navigate('/donate');
-    const button = new Control({ 'data-analytics': 'account_copy' });
-    expect(click(new Control({}, button))).toBe(true);
-    expect(track).toHaveBeenCalledWith({
-      website: websiteId,
-      hostname: 'fundacionsonluz.com',
-      url: '/donate',
-      name: 'account_copy',
+    expect(
+      click(new Control({}, new Control({ 'data-analytics': 'account_copy' })))
+    ).toBe(true);
+    expect(payload()).toEqual({
+      type: 'click',
+      path: '/donate',
+      action: 'account_copy',
     });
+    for (const href of [
+      'mailto:private@example.test?subject=Private',
+      'https://other.example/?private=yes',
+    ])
+      expect(
+        click(new Control({ 'data-analytics': 'footer_email', href }))
+      ).toBe(true);
+    expect(JSON.stringify(track.mock.calls)).not.toMatch(
+      /private|other.example/i
+    );
   });
-
-  it('does not record unmarked, disabled, unknown or admin controls', () => {
+  it('ignores unmarked, disabled, unknown and admin-targeting controls', () => {
     const disabled = new Control({ 'data-analytics': 'contact_submit' });
     disabled.disabled = true;
-    for (const control of [
+    for (const target of [
       new Control(),
       disabled,
-      new Control({ 'data-analytics': 'private message' }),
+      new Control({ 'data-analytics': 'private' }),
       new Control({ 'data-analytics': 'nav_home', href: '/admin' }),
-    ]) {
-      expect(click(control)).toBe(false);
-    }
+    ])
+      expect(click(target)).toBe(false);
     expect(
       trackPublicClick(config, { target: null } as unknown as MouseEvent)
     ).toBe(false);
     expect(track).not.toHaveBeenCalled();
   });
-
-  it('records annotated mail and external links without sending destinations', () => {
-    expect(
-      click(
-        new Control({
-          'data-analytics': 'footer_email',
-          href: 'mailto:private@example.test?subject=Private',
-        })
-      )
-    ).toBe(true);
-    expect(
-      click(
-        new Control({
-          'data-analytics': 'footer_developer',
-          href: 'https://juanmurillo.co/?private=value',
-        })
-      )
-    ).toBe(true);
-    expect(JSON.stringify(track.mock.calls)).not.toMatch(
-      /private|mailto|juanmurillo/
-    );
-  });
-
-  it('leaves website actions working when the script is blocked or errors', async () => {
-    delete window.umami;
-    expect(trackPublicPage(config, '/')).toBe(false);
-    window.umami = { track };
+  it('does not break controls on blocked requests or network errors', async () => {
     track.mockImplementationOnce(() => {
       throw new Error('Blocked');
     });
@@ -338,8 +273,7 @@ describe('analytics privacy and public interactions', () => {
     expect(trackPublicPage(config, '/')).toBe(true);
     await Promise.resolve();
   });
-
-  it('mounts the tracker only in the public layout and disables automatic collection', () => {
+  it('mounts only in the public layout without any external tracking script', () => {
     expect(readFileSync('app/(site)/layout.tsx', 'utf8')).toContain(
       '<SiteAnalytics'
     );
@@ -347,15 +281,34 @@ describe('analytics privacy and public interactions', () => {
       'app/layout.tsx',
       'app/admin/layout.tsx',
       'app/admin/(protected)/layout.tsx',
-    ]) {
+    ])
       expect(readFileSync(file, 'utf8')).not.toContain('SiteAnalytics');
-    }
     const component = readFileSync('components/site-analytics.tsx', 'utf8');
-    expect(component).toContain('data-auto-track="false"');
-    expect(component).toContain('data-before-send="sonluzAnalyticsBeforeSend"');
+    expect(component).not.toMatch(/<Script|umami|beforeSend/);
     expect(component).toContain('lastPath.current === pathname');
     expect(component).toContain(
       "document.removeEventListener('click', click, true)"
     );
+  });
+});
+
+describe('strict event schema shared with the collector and Worker', () => {
+  it.each([
+    null,
+    [],
+    {},
+    { type: 'identify', path: '/' },
+    { type: 'pageview', path: '/admin' },
+    { type: 'pageview', path: '/?email=private' },
+    { type: 'pageview', path: '/blog/post#private' },
+    { type: 'pageview', path: '/about/' },
+    { type: 'pageview', path: '/', email: 'private' },
+    { type: 'pageview', path: '/', action: 'nav_home' },
+    { type: 'click', path: '/' },
+    { type: 'click', path: '/', action: 'private' },
+    { type: 'pageview', path: origin },
+    { type: 'pageview', path: '/'.repeat(251) },
+  ])('rejects malformed, private or noncanonical input: %j', (event) => {
+    expect(parseAnalyticsEvent(event)).toBe(false);
   });
 });

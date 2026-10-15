@@ -73,23 +73,37 @@ Eliminar una entrada quita sus referencias y su acceso público, pero no borra a
 
 ## Analítica de la web pública
 
-Integración opcional con [Umami](https://umami.is/), independiente de Vercel y del backend D1/R2. Las estadísticas se consultan en el dashboard de Umami, no en el editor. Se cuentan vistas de `/`, `/about`, `/donate`, `/contact`, `/blog` y artículos, incluidas las transiciones Next.js sin recarga. Los controles marcados con `data-analytics` envían nombres estables: navegación de escritorio/móvil, abrir/cerrar menú, enlaces de donar/contactar, copiar cuenta, botón de contacto, correo, abrir artículos y volver al blog.
+Integración opcional con **Cloudflare Workers Analytics Engine**, sin Umami ni scripts externos. El navegador envía eventos mínimos a `/api/analytics`; Next.js valida origen, dominio, ruta pública y privacidad, y los reenvía al Worker con su secreto privado. El Worker vuelve a validar el evento y escribe en el dataset `sonluz_public`, separado del blog D1 y de R2. Se cuentan vistas de `/`, `/about`, `/donate`, `/contact`, `/blog` y artículos, incluidas transiciones Next.js sin recarga. Los controles `data-analytics` envían nombres estables: navegación, menú, donar/contactar, copiar cuenta, correo y enlaces del blog.
 
-Los eventos representan **clics**, no donaciones completadas, copias exitosas ni mensajes entregados. No se envían valores del formulario, textos de botones, títulos de artículos, direcciones de enlaces, parámetros de URL, hashes, referrers ni identificadores personalizados. No se usan cookies analíticas, `identify`, grabación de sesiones ni seguimiento automático. Umami procesa los datos y metadatos de las solicitudes según su política; esto no implica que ningún dato técnico llegue al proveedor.
+Los eventos representan **clics**, no donaciones completadas, copias exitosas ni mensajes entregados. No hay visitantes únicos, atribución, sesiones ni conversiones verificadas. No se almacenan valores del formulario, textos, títulos, destinos de enlaces, parámetros, fragmentos, referrers, IP, user-agent ni identificadores de visitantes. El navegador omite cookies y elimina consultas/fragmentos del `Referer` del colector; Next.js no reenvía cabeceras del visitante. El dataset guarda solo versión, hostname, tipo, ruta y nombre del clic, con timestamp de Cloudflare y contador 1. Los proveedores de alojamiento siguen procesando metadatos de red en sus solicitudes y logs: esto no significa anonimato de transporte.
 
-El tracker solo se monta en el layout público, nunca en `/admin`, login, APIs o vistas previas del editor. Cada envío vuelve a comprobar ruta, dominio y privacidad, incluso si el script quedó cargado antes de entrar al administrador. Respeta Do Not Track, Global Privacy Control y `localStorage.setItem('umami.disabled', '1')`; para volver a habilitarlo elimina esa clave y recarga. Errores o bloqueadores del tracker no impiden navegar, copiar la cuenta ni enviar el formulario.
+El tracker solo se monta en el layout público, nunca en `/admin`, login, APIs o previews del editor. Cada envío vuelve a comprobar ruta, dominio y privacidad. Respeta DNT, GPC y `localStorage.setItem('sonluz.analytics.disabled', '1')`; la antigua clave `umami.disabled` también se respeta para conservar opt-outs. Eliminar las claves y recargar permite reactivarlo. El colector exige JSON, un origen HTTPS permitido, una ruta de origen pública coincidente y un cuerpo de hasta 1 KiB. El Worker necesita autenticación y limita ráfagas a 600 eventos/minuto por sitio y ubicación Cloudflare. No es una cuota global ni un control de facturación. Los errores no bloquean acciones de la web; no se reintenta el envío.
 
 Para activarlo cuando se apruebe el despliegue:
 
-1. Crear una cuenta [Umami Cloud](https://cloud.umami.is/signup) o usar una instancia propia y registrar el sitio. Elegir el plan conscientemente, sin activar un trial de pago automáticamente; [precios y cuotas](https://umami.is/pricing).
-2. Configurar `SONLUZ_UMAMI_WEBSITE_ID` con el UUID de ese sitio (es público, no una contraseña ni API key).
-3. Dejar `SONLUZ_UMAMI_SCRIPT_URL` vacío para `https://cloud.umami.is/script.js`, o configurar la URL HTTPS del tracker de la instancia propia.
-4. Mantener `NEXT_PUBLIC_SITE_URL` como dominio público canónico. Solo se admite ese hostname y su variante `www`; localhost y previews no envían eventos. La integración está desactivada en desarrollo o si falta el ID.
-5. Compilar/desplegar con esas variables y comprobar vistas y eventos en el dashboard. No configurar auto-tracking ni sustituir la integración por el snippet automático del proveedor: las exclusiones dependen de envíos explícitos filtrados.
+1. Mantener el binding `PUBLIC_ANALYTICS` al dataset `sonluz_public` en Wrangler. El dataset remoto se crea automáticamente al escribir el primer evento tras desplegar, no durante el desarrollo local.
+2. Configurar `SONLUZ_ANALYTICS_ENABLED=1` en **ambos** servicios: Next.js (compilación y runtime) y Worker (variable Wrangler, actualmente `0`). Mantener `NEXT_PUBLIC_SITE_URL` y `SONLUZ_ANALYTICS_SITE_URL` con el mismo dominio HTTPS canónico. Solo se admiten ese hostname y su variante `www`; localhost, otros previews y desarrollo quedan excluidos.
+3. Mantener `SONLUZ_CMS_URL` y `SONLUZ_WORKER_SECRET` únicamente en servidor. No hace falta un API token Cloudflare para escribir eventos desde el binding.
+4. Verificar eventos reales con un dominio/dataset de pruebas dedicado antes de activar producción. La aceptación HTTP no demuestra persistencia remota: Analytics Engine escribe en segundo plano, aplica muestreo y puede descartar eventos; esta analítica es orientativa, no contabilidad.
 
-No se ha creado ninguna cuenta, activado un plan ni conectado una propiedad real. No se ha modificado la web existente en GitHub Pages. Las pruebas usan un tracker simulado y no envían estadísticas reales. Para pruebas controladas fuera de producción, usar un ID separado y un dominio de prueba HTTPS explícito, nunca mezclar datos de fixture con el sitio real.
+### Consultar estadísticas
 
-Documentación consultada: [configuración del tracker](https://umami.is/docs/tracker-configuration) y [envíos manuales](https://umami.is/docs/tracker-functions).
+Cloudflare Web Analytics estándar **no admite eventos personalizados**. Esta solución usa Analytics Engine y no genera un dashboard Umami ni añade estadísticas al editor. El comando privado devuelve hasta 500 combinaciones de tipo/ruta/acción, ordenadas por número de eventos del periodo:
+
+```sh
+# Solo en un terminal de confianza. Nunca NEXT_PUBLIC_, ni en Git ni en el navegador.
+export CLOUDFLARE_ACCOUNT_ID='<account-id>'
+read -rsp 'Token Account Analytics: Read: ' CLOUDFLARE_ANALYTICS_READ_TOKEN; echo
+export CLOUDFLARE_ANALYTICS_READ_TOKEN
+npm run analytics:report -- 30
+unset CLOUDFLARE_ANALYTICS_READ_TOKEN
+```
+
+El token requiere únicamente **Account → Account Analytics → Read**, restringido a la cuenta correspondiente. El comando consulta la API SQL oficial y pondera `SUM(_sample_interval * double1)` para considerar el muestreo; admite 1–90 días. Este permiso de lectura se configurará al desplegar, no se reutiliza un token R2/D1 con permisos distintos. También se puede integrar esa API con Grafana u otra visualización más adelante.
+
+Cloudflare documenta 100.000 escrituras y 10.000 consultas/día en Workers Free, y retención de tres meses. Su página de precios indica que actualmente Analytics Engine no se factura y publica precios futuros; comprobar cuotas/condiciones de la cuenta al desplegar. Cada evento también consume una solicitud a Next.js y al Worker, sujetas a las cuotas de su alojamiento. No se ha activado un plan de pago, desplegado un Worker, creado un dataset remoto ni enviado eventos reales. La web GitHub Pages y el DNS siguen iguales. Los tests simulan transporte/lectura y capturan el binding de escritura; Wrangler local no prueba almacenamiento ni consultas remotas.
+
+Documentación consultada: [inicio y binding](https://developers.cloudflare.com/analytics/analytics-engine/get-started/), [API SQL y permisos](https://developers.cloudflare.com/analytics/analytics-engine/sql-api/), [muestreo](https://developers.cloudflare.com/analytics/analytics-engine/sampling/), [retención](https://developers.cloudflare.com/analytics/analytics-engine/limits/), [precios](https://developers.cloudflare.com/analytics/analytics-engine/pricing/), [Web Analytics sin eventos personalizados](https://developers.cloudflare.com/web-analytics/faq/) y [límites de ráfagas](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/).
 
 ## Calidad
 
@@ -112,6 +126,8 @@ unset PASSWORD
 ```
 
 Solo admite URLs localhost. Usa `SONLUZ_SITE_TEST_URL` si el sitio escucha en otro puerto. Crea y elimina una entrada temporal en D1 local; la imagen de prueba queda privada en R2 local. No sustituye una prueba visual en navegador.
+
+La prueba adicional `npm run analytics:smoke` usa exclusivamente un sitio y Worker locales con dominio lógico `https://sonluz-test.example.test`. Antes de compilar/arrancar Next.js, exportar `SONLUZ_ANALYTICS_ENABLED=1` y `NEXT_PUBLIC_SITE_URL=https://sonluz-test.example.test`; arrancar Wrangler con `npm run cms:dev -- --port 8787 --var SONLUZ_ANALYTICS_ENABLED:1 --var SONLUZ_ANALYTICS_SITE_URL:https://sonluz-test.example.test`. Comprueba aceptación de vistas/clics, rechazo de fuentes privadas/externas, tamaño/forma del cuerpo, DNT/GPC y configuración del tracker ausente en login. No consulta Analytics Engine remoto ni acredita persistencia. CI ejecuta ambas pruebas; fuera de CI, restaurar las variables originales y recompilar después.
 
 La auditoría de dependencias de producción (`npm audit --omit=dev`) no detecta vulnerabilidades. La auditoría completa aún informa una [vulnerabilidad de recursión en braces](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), transitiva del linter de desarrollo. `npm audit` sugiere bajar `eslint-config-next` a 14.2.35; no se ha aplicado esa degradación mayor en un proyecto Next.js 16 ni desactivado las comprobaciones. Tiptap se fija a una misma versión en todas sus extensiones y Vitest usa Vite 7 para mantener reproducible la instalación con npm 10.
 

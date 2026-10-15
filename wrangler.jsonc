@@ -4,7 +4,19 @@
   "main": "cloudflare/worker.ts",
   "compatibility_date": "2026-10-13",
   "workers_dev": false,
+  "vars": {
+    "SONLUZ_ANALYTICS_ENABLED": "0",
+    "SONLUZ_ANALYTICS_SITE_URL": "https://fundacionsonluz.com",
+  },
+  "analytics_engine_datasets": [
+    { "binding": "PUBLIC_ANALYTICS", "dataset": "sonluz_public" },
+  ],
   "ratelimits": [
+    {
+      "name": "ANALYTICS_RATE_LIMITER",
+      "namespace_id": "1792007277",
+      "simple": { "limit": 600, "period": 60 },
+    },
     {
       "name": "LOGIN_RATE_LIMITER",
       "namespace_id": "1792007276",

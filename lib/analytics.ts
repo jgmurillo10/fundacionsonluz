@@ -1,6 +1,4 @@
 export type AnalyticsConfig = {
-  websiteId: string;
-  scriptUrl: string;
   domains: string[];
 };
 
@@ -37,20 +35,31 @@ export const analyticsActions = [
   'blog_contact',
 ] as const;
 type AnalyticsAction = (typeof analyticsActions)[number];
-type AnalyticsPayload = {
-  website: string;
-  hostname: string;
-  url: string;
-  name?: AnalyticsAction;
-};
+export type AnalyticsEvent =
+  | { type: 'pageview'; path: string }
+  | { type: 'click'; path: string; action: AnalyticsAction };
 
-declare global {
-  interface Window {
-    umami?: { track: (payload: AnalyticsPayload) => Promise<unknown> | void };
-    sonluzAnalyticsBeforeSend?: (
-      type: string,
-      payload: Record<string, unknown>
-    ) => AnalyticsPayload | false;
+export function analyticsDomains(value: string): string[] | null {
+  try {
+    const site = new URL(value);
+    const host = site.hostname.replace(/^www\./, '');
+    if (
+      site.protocol !== 'https:' ||
+      site.username ||
+      site.password ||
+      site.search ||
+      site.hash ||
+      site.port ||
+      site.pathname !== '/' ||
+      !host.includes('.') ||
+      host.endsWith('.localhost') ||
+      host.includes(':') ||
+      /^\d+(?:\.\d+){3}$/.test(host)
+    )
+      return null;
+    return [host, `www.${host}`];
+  } catch {
+    return null;
   }
 }
 
@@ -83,7 +92,10 @@ export function analyticsAllowed(config: AnalyticsConfig) {
   )
     return false;
   try {
-    return !window.localStorage.getItem('umami.disabled');
+    return (
+      !window.localStorage.getItem('sonluz.analytics.disabled') &&
+      !window.localStorage.getItem('umami.disabled')
+    );
   } catch {
     return false;
   }
@@ -91,28 +103,46 @@ export function analyticsAllowed(config: AnalyticsConfig) {
 
 export function filterAnalyticsPayload(
   config: AnalyticsConfig,
-  type: string,
   payload: Record<string, unknown>
-): AnalyticsPayload | false {
-  if (type !== 'event' || !analyticsAllowed(config)) return false;
-  if (typeof payload.url !== 'string') return false;
-  const path = publicAnalyticsPath(payload.url, window.location.origin);
+): AnalyticsEvent | false {
+  if (!analyticsAllowed(config) || typeof payload.path !== 'string')
+    return false;
+  const path = publicAnalyticsPath(payload.path, window.location.origin);
   if (!path) return false;
+  return parseAnalyticsEvent({
+    type: payload.type,
+    path,
+    ...(payload.action === undefined ? {} : { action: payload.action }),
+  });
+}
+
+export function parseAnalyticsEvent(value: unknown): AnalyticsEvent | false {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
   if (
-    payload.name !== undefined &&
-    !analyticsActions.includes(payload.name as AnalyticsAction)
+    Object.keys(event).some(
+      (key) => !['type', 'path', 'action'].includes(key)
+    ) ||
+    typeof event.path !== 'string' ||
+    publicAnalyticsPath(event.path, 'https://analytics.invalid') !== event.path
   )
     return false;
-  return {
-    website: config.websiteId,
-    hostname: window.location.hostname,
-    url: path,
-    ...(payload.name ? { name: payload.name as AnalyticsAction } : {}),
-  };
+  if (event.type === 'pageview' && event.action === undefined)
+    return { type: 'pageview', path: event.path };
+  if (
+    event.type === 'click' &&
+    analyticsActions.includes(event.action as AnalyticsAction)
+  )
+    return {
+      type: 'click',
+      path: event.path,
+      action: event.action as AnalyticsAction,
+    };
+  return false;
 }
 
 export function trackPublicPage(config: AnalyticsConfig, pathname: string) {
-  return send(config, { url: pathname });
+  return send(config, { type: 'pageview', path: pathname });
 }
 
 export function trackPublicClick(config: AnalyticsConfig, event: MouseEvent) {
@@ -137,14 +167,28 @@ export function trackPublicClick(config: AnalyticsConfig, event: MouseEvent) {
       return false;
     }
   }
-  return send(config, { url: window.location.pathname, name: action });
+  return send(config, {
+    type: 'click',
+    path: window.location.pathname,
+    action,
+  });
 }
 
 function send(config: AnalyticsConfig, input: Record<string, unknown>) {
-  const payload = filterAnalyticsPayload(config, 'event', input);
-  if (!payload || !window.umami) return false;
+  const payload = filterAnalyticsPayload(config, input);
+  if (!payload) return false;
   try {
-    void Promise.resolve(window.umami.track(payload)).catch(() => {});
+    void fetch('/api/analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      credentials: 'omit',
+      mode: 'same-origin',
+      cache: 'no-store',
+      keepalive: true,
+      referrer: `${window.location.origin}${payload.path}`,
+      referrerPolicy: 'same-origin',
+    }).catch(() => {});
     return true;
   } catch {
     return false;

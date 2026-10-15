@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -33,6 +33,7 @@ describe('Worker CRUD with SQLite migrations and private R2', () => {
   let secret: string;
   let env: Parameters<typeof worker.fetch>[1];
   let objects: Map<string, Uint8Array>;
+  let analyticsPoints: unknown[];
   beforeEach(() => {
     db = new DatabaseSync(':memory:');
     db.exec('PRAGMA foreign_keys = ON');
@@ -48,9 +49,21 @@ describe('Worker CRUD with SQLite migrations and private R2', () => {
         )
       );
     objects = new Map();
+    analyticsPoints = [];
     secret = randomBytes(32).toString('hex');
     const attempts = new Map<string, number>();
     env = {
+      SONLUZ_ANALYTICS_ENABLED: '1',
+      PUBLIC_ANALYTICS: {
+        writeDataPoint(point: unknown) {
+          analyticsPoints.push(point);
+        },
+      },
+      ANALYTICS_RATE_LIMITER: {
+        async limit() {
+          return { success: true };
+        },
+      },
       SONLUZ_WORKER_SECRET: secret,
       BLOG_DB: {
         prepare(sql: string) {
@@ -138,6 +151,124 @@ describe('Worker CRUD with SQLite migrations and private R2', () => {
     expect(response.status).toBe(201);
     return response.json();
   };
+  it('writes public page views and named clicks with a fixed privacy-preserving schema', async () => {
+    expect(
+      (
+        await call('/analytics/events', 'POST', {
+          hostname: 'fundacionsonluz.com',
+          type: 'pageview',
+          path: '/about',
+        })
+      ).status
+    ).toBe(202);
+    expect(
+      (
+        await call('/analytics/events', 'POST', {
+          hostname: 'www.fundacionsonluz.com',
+          type: 'click',
+          path: '/donate',
+          action: 'account_copy',
+        })
+      ).status
+    ).toBe(202);
+    expect(analyticsPoints).toEqual([
+      {
+        indexes: ['fundacionsonluz.com'],
+        blobs: ['v1', 'fundacionsonluz.com', 'pageview', '/about', ''],
+        doubles: [1],
+      },
+      {
+        indexes: ['fundacionsonluz.com'],
+        blobs: [
+          'v1',
+          'www.fundacionsonluz.com',
+          'click',
+          '/donate',
+          'account_copy',
+        ],
+        doubles: [1],
+      },
+    ]);
+    expect((await call('/posts')).status).toBe(200);
+    expect(analyticsPoints).toHaveLength(2);
+  });
+  it.each([
+    { hostname: 'preview.example', type: 'pageview', path: '/' },
+    { hostname: 'fundacionsonluz.com', type: 'pageview', path: '/admin/login' },
+    {
+      hostname: 'fundacionsonluz.com',
+      type: 'pageview',
+      path: '/about?email=private',
+    },
+    {
+      hostname: 'fundacionsonluz.com',
+      type: 'pageview',
+      path: '/',
+      email: 'private',
+    },
+    {
+      hostname: 'fundacionsonluz.com',
+      type: 'click',
+      path: '/',
+      action: 'private',
+    },
+    null,
+    [],
+  ])('rejects invalid events at the Worker boundary: %j', async (body) => {
+    expect((await call('/analytics/events', 'POST', body)).status).toBe(400);
+    expect(analyticsPoints).toHaveLength(0);
+  });
+  it('requires Worker auth, bounds request size and honors the disable flag and limiter', async () => {
+    const event = {
+      hostname: 'fundacionsonluz.com',
+      type: 'pageview',
+      path: '/',
+    };
+    expect(
+      (await call('/analytics/events', 'POST', event, { authorization: '' }))
+        .status
+    ).toBe(401);
+    expect(
+      (await call('/analytics/events', 'POST', { padding: 'x'.repeat(1025) }))
+        .status
+    ).toBe(413);
+    env.SONLUZ_ANALYTICS_ENABLED = '0';
+    expect((await call('/analytics/events', 'POST', event)).status).toBe(503);
+    env.SONLUZ_ANALYTICS_ENABLED = '1';
+    vi.spyOn(env.ANALYTICS_RATE_LIMITER, 'limit').mockResolvedValueOnce({
+      success: false,
+    });
+    expect((await call('/analytics/events', 'POST', event)).status).toBe(429);
+    expect(analyticsPoints).toHaveLength(0);
+  });
+  it('supports an explicitly configured test domain without mixing production traffic', async () => {
+    env.SONLUZ_ANALYTICS_SITE_URL = 'https://sonluz-test.example.test';
+    expect(
+      (
+        await call('/analytics/events', 'POST', {
+          hostname: 'fundacionsonluz.com',
+          type: 'pageview',
+          path: '/',
+        })
+      ).status
+    ).toBe(400);
+    expect(
+      (
+        await call('/analytics/events', 'POST', {
+          hostname: 'sonluz-test.example.test',
+          type: 'pageview',
+          path: '/',
+        })
+      ).status
+    ).toBe(202);
+    expect(analyticsPoints).toEqual([
+      {
+        indexes: ['sonluz-test.example.test'],
+        blobs: ['v1', 'sonluz-test.example.test', 'pageview', '/', ''],
+        doubles: [1],
+      },
+    ]);
+  });
   const upload = () =>
     worker.fetch(
       new Request('https://worker.test/media', {

@@ -19,8 +19,7 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
-      - run: npm run build
-      - name: Local D1/R2 and Next.js HTTP integration
+      - name: Production build and local CMS/analytics HTTP integration
         run: |
           export SONLUZ_ADMIN_EMAIL=editor@example.test
           export SONLUZ_ADMIN_PASSWORD="$(openssl rand -hex 24)"
@@ -30,11 +29,20 @@ jobs:
           echo "::add-mask::$SONLUZ_ADDITIONAL_ADMIN_PASSWORD"
           npm run cms:setup
           npm run cms:migrate:local
-          npm run cms:dev -- --port 8787 > .wrangler/worker.log 2>&1 &
+          npm run cms:dev -- --port 8787 --var SONLUZ_ANALYTICS_ENABLED:1 --var SONLUZ_ANALYTICS_SITE_URL:https://sonluz-test.example.test > .wrangler/worker.log 2>&1 &
           WORKER_PID=$!
+          trap 'kill "$WORKER_PID" "${SITE_PID:-}" 2>/dev/null || true' EXIT
+          for attempt in {1..30}; do
+            if curl -s -o /dev/null http://127.0.0.1:8787/posts; then
+              break
+            fi
+            sleep 1
+          done
+          export NEXT_PUBLIC_SITE_URL=https://sonluz-test.example.test
+          export SONLUZ_ANALYTICS_ENABLED=1
+          npm run build
           npm run start -- --port 3005 > .wrangler/site.log 2>&1 &
           SITE_PID=$!
-          trap 'kill "$WORKER_PID" "$SITE_PID" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do
             if curl -s -o /dev/null http://127.0.0.1:8787/posts && curl -s -o /dev/null http://127.0.0.1:3005/admin/login; then
               break
@@ -42,3 +50,4 @@ jobs:
             sleep 1
           done
           npm run cms:smoke
+          npm run analytics:smoke

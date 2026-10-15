@@ -6,7 +6,9 @@ import {
   type RichNode,
 } from '../lib/blog';
 import { HttpError, readBody, readJson } from '../lib/request-body';
+import { analyticsDomains, parseAnalyticsEvent } from '../lib/analytics';
 import type {
+  AnalyticsEngineDataset,
   D1Database,
   R2Bucket,
   RateLimit,
@@ -17,6 +19,10 @@ type Env = {
   BLOG_MEDIA: R2Bucket;
   SONLUZ_WORKER_SECRET: string;
   LOGIN_RATE_LIMITER: RateLimit;
+  PUBLIC_ANALYTICS: AnalyticsEngineDataset;
+  ANALYTICS_RATE_LIMITER: RateLimit;
+  SONLUZ_ANALYTICS_ENABLED?: string;
+  SONLUZ_ANALYTICS_SITE_URL?: string;
 };
 
 type Row = {
@@ -295,6 +301,40 @@ const worker = {
     const url = new URL(request.url);
     const parts = url.pathname.split('/').filter(Boolean);
     try {
+      if (url.pathname === '/analytics/events' && request.method === 'POST') {
+        if (env.SONLUZ_ANALYTICS_ENABLED !== '1' || !env.PUBLIC_ANALYTICS)
+          return json({ error: 'Analítica desactivada.' }, 503);
+        const body = await readJson(request, 1024);
+        if (!body || typeof body !== 'object' || Array.isArray(body))
+          return json({ error: 'Evento inválido.' }, 400);
+        const { hostname, ...input } = body as Record<string, unknown>;
+        const event = parseAnalyticsEvent(input);
+        const domains = analyticsDomains(
+          env.SONLUZ_ANALYTICS_SITE_URL || 'https://fundacionsonluz.com'
+        );
+        if (
+          !event ||
+          typeof hostname !== 'string' ||
+          !domains?.includes(hostname)
+        )
+          return json({ error: 'Evento inválido.' }, 400);
+        const { success } = await env.ANALYTICS_RATE_LIMITER.limit({
+          key: domains[0],
+        });
+        if (!success) return json({ error: 'Demasiados eventos.' }, 429);
+        env.PUBLIC_ANALYTICS.writeDataPoint({
+          indexes: [domains[0]],
+          blobs: [
+            'v1',
+            hostname,
+            event.type,
+            event.path,
+            event.type === 'click' ? event.action : '',
+          ],
+          doubles: [1],
+        });
+        return json({ accepted: true }, 202);
+      }
       if (url.pathname === '/auth/attempt' && request.method === 'POST') {
         const body = (await readJson(request, 4096)) as { key?: string };
         if (
