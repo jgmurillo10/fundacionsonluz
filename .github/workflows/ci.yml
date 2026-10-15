@@ -25,6 +25,9 @@ jobs:
           export SONLUZ_ADMIN_EMAIL=editor@example.test
           export SONLUZ_ADMIN_PASSWORD="$(openssl rand -hex 24)"
           echo "::add-mask::$SONLUZ_ADMIN_PASSWORD"
+          export SONLUZ_ADDITIONAL_ADMIN_EMAIL=second-editor@example.test
+          export SONLUZ_ADDITIONAL_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$SONLUZ_ADDITIONAL_ADMIN_PASSWORD"
           npm run cms:setup
           npm run cms:migrate:local
           npm run cms:dev -- --port 8787 > .wrangler/worker.log 2>&1 &

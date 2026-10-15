@@ -10,12 +10,19 @@ if (
     'Esta prueba solo puede ejecutarse contra el sitio y Worker locales.'
   );
 const password = process.env.SONLUZ_ADMIN_PASSWORD;
+const additionalEmail = process.env.SONLUZ_ADDITIONAL_ADMIN_EMAIL;
+const additionalPassword = process.env.SONLUZ_ADDITIONAL_ADMIN_PASSWORD;
+if (!!additionalEmail !== !!additionalPassword)
+  throw new Error(
+    'Configura el correo y contraseña del administrador adicional para probarlo.'
+  );
 if (!password || !process.env.SONLUZ_ADMIN_EMAIL)
   throw new Error(
     'SONLUZ_ADMIN_EMAIL y SONLUZ_ADMIN_PASSWORD deben estar disponibles para la prueba local.'
   );
 
 let cookie = '';
+let primaryCookie = '';
 let id;
 const slug = `prueba-de-sonluz-${Date.now()}`;
 const png = Buffer.from(
@@ -109,6 +116,7 @@ try {
   });
   assert.equal(login.status, 200);
   cookie = login.headers.get('set-cookie')?.split(';')[0] || '';
+  primaryCookie = cookie;
   assert.ok(
     cookie.startsWith('sonluz-editor='),
     'No recibimos la sesión editorial.'
@@ -158,6 +166,36 @@ try {
   );
   assert.equal((await call(`/blog/${slug}`)).status, 404);
   assert.equal((await call(src, { authenticated: false })).status, 404);
+
+  if (additionalEmail && additionalPassword) {
+    for (const credentials of [
+      { email: additionalEmail, password },
+      { email: process.env.SONLUZ_ADMIN_EMAIL, password: additionalPassword },
+      { email: 'not-allowlisted@example.test', password },
+    ]) {
+      const denied = await call('/api/editor/session', {
+        method: 'POST',
+        body: credentials,
+        authenticated: false,
+      });
+      assert.equal(denied.status, 401);
+      assert.equal(denied.headers.get('set-cookie'), null);
+    }
+    const secondLogin = await call('/api/editor/session', {
+      method: 'POST',
+      body: {
+        email: ` ${additionalEmail.toUpperCase()} `,
+        password: additionalPassword,
+      },
+      authenticated: false,
+    });
+    assert.equal(secondLogin.status, 200);
+    cookie = secondLogin.headers.get('set-cookie')?.split(';')[0] || '';
+    assert.ok(cookie.startsWith('sonluz-editor='));
+    assert.equal((await call('/admin')).status, 200);
+    assert.equal((await call(`/api/editor/posts/${id}`)).status, 200);
+    assert.equal((await call(src)).status, 200);
+  }
 
   const published = await call(`/api/editor/posts/${id}`, {
     method: 'PUT',
@@ -224,6 +262,18 @@ try {
   );
   cookie = '';
   assert.equal((await call('/api/editor/posts')).status, 401);
+  if (additionalEmail) {
+    cookie = primaryCookie;
+    assert.equal((await call('/api/editor/posts')).status, 200);
+    assert.equal(
+      (await call('/api/editor/session', { method: 'DELETE' })).status,
+      200
+    );
+    cookie = '';
+    console.log(
+      'Independent admin logins, cross-password rejection and shared editorial access: passed.'
+    );
+  }
   console.log(
     'Local Worker + Next.js HTTP CRUD, login/logout, media privacy and publish/unpublish: passed.'
   );

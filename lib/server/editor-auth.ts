@@ -2,18 +2,43 @@ import 'server-only';
 import { createHash, scrypt, timingSafeEqual } from 'node:crypto';
 import { cookies } from 'next/headers';
 import { getIronSession } from 'iron-session';
+import { z } from 'zod';
 import { localPreviewEnabled } from '../local-preview';
 import { cmsConfigured } from './cms';
 import { HttpError } from '../request-body';
 
 type EditorialSession = { email: string; version: string };
 
+const adminSchema = z.object({
+  email: z.string().trim().toLowerCase().pipe(z.email().max(254)),
+  passwordHash: z.string().regex(/^[0-9a-f]{32}:[0-9a-f]{64}$/),
+});
+type EditorialAdmin = z.infer<typeof adminSchema>;
+
+function configuredAdmins(): EditorialAdmin[] {
+  try {
+    const additional: unknown = JSON.parse(
+      process.env.SONLUZ_ADDITIONAL_ADMINS || '[]'
+    );
+    if (!Array.isArray(additional)) return [];
+    const admins = z.array(adminSchema).parse([
+      {
+        email: process.env.SONLUZ_ADMIN_EMAIL,
+        passwordHash: process.env.SONLUZ_ADMIN_PASSWORD_HASH,
+      },
+      ...additional,
+    ]);
+    if (new Set(admins.map((admin) => admin.email)).size !== admins.length)
+      return [];
+    return admins;
+  } catch {
+    return [];
+  }
+}
+
 export function authConfigured() {
   return (
-    !!process.env.SONLUZ_ADMIN_EMAIL &&
-    /^[0-9a-f]{32}:[0-9a-f]{64}$/.test(
-      process.env.SONLUZ_ADMIN_PASSWORD_HASH || ''
-    ) &&
+    configuredAdmins().length > 0 &&
     (process.env.SONLUZ_SESSION_SECRET?.length || 0) >= 32
   );
 }
@@ -49,13 +74,8 @@ export async function canEdit() {
   if (localCmsPreview()) return true;
   if (!authConfigured()) return false;
   const session = await editorSession();
-  return (
-    session.email === process.env.SONLUZ_ADMIN_EMAIL?.trim().toLowerCase() &&
-    session.version ===
-      createHash('sha256')
-        .update(process.env.SONLUZ_ADMIN_PASSWORD_HASH!)
-        .digest('hex')
-  );
+  const admin = configuredAdmins().find(({ email }) => email === session.email);
+  return !!admin && session.version === sessionVersion(admin);
 }
 
 export async function requireEditor(request?: Request) {
@@ -100,8 +120,19 @@ export async function verifyPassword(password: string, stored: string) {
   return timingSafeEqual(actual, Buffer.from(expected, 'hex'));
 }
 
-export function sessionVersion() {
+export async function verifyAdminCredentials(email: string, password: string) {
+  const admins = configuredAdmins();
+  const admin = admins.find(
+    (candidate) => candidate.email === email.trim().toLowerCase()
+  );
+  const hash = admin?.passwordHash || admins[0]?.passwordHash;
+  if (!hash) return null;
+  const valid = await verifyPassword(password, hash);
+  return valid && admin ? admin : null;
+}
+
+export function sessionVersion(admin: EditorialAdmin) {
   return createHash('sha256')
-    .update(process.env.SONLUZ_ADMIN_PASSWORD_HASH!)
+    .update(JSON.stringify([admin.email, admin.passwordHash]))
     .digest('hex');
 }

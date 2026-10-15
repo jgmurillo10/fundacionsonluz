@@ -22,6 +22,7 @@ import {
   localCmsPreview,
   requireSameOrigin,
   sessionVersion,
+  verifyAdminCredentials,
   verifyPassword,
 } from '../lib/server/editor-auth';
 import { cmsConfigured } from '../lib/server/cms';
@@ -42,6 +43,7 @@ describe('editor authentication and request boundary', () => {
     vi.stubEnv('SONLUZ_SESSION_SECRET', randomBytes(32).toString('hex'));
     vi.stubEnv('SONLUZ_ADMIN_EMAIL', 'editor@example.test');
     vi.stubEnv('SONLUZ_ADMIN_PASSWORD_HASH', hash);
+    vi.stubEnv('SONLUZ_ADDITIONAL_ADMINS', '');
     vi.stubEnv('SONLUZ_LOCAL_PREVIEW', '1');
   });
   afterEach(() => {
@@ -58,7 +60,10 @@ describe('editor authentication and request boundary', () => {
     expect(await canEdit()).toBe(false);
     const session = await editorSession();
     session.email = 'editor@example.test';
-    session.version = sessionVersion();
+    session.version = sessionVersion({
+      email: session.email,
+      passwordHash: hash,
+    });
     await session.save();
     expect(state.set).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -82,7 +87,10 @@ describe('editor authentication and request boundary', () => {
   it('expires sessions and destroys the session on logout', async () => {
     const session = await editorSession();
     session.email = 'editor@example.test';
-    session.version = sessionVersion();
+    session.version = sessionVersion({
+      email: session.email,
+      passwordHash: hash,
+    });
     await session.save();
     const saved = state.jar.get('sonluz-editor')!;
     (await editorSession()).destroy();
@@ -91,6 +99,126 @@ describe('editor authentication and request boundary', () => {
     vi.useFakeTimers();
     vi.setSystemTime(Date.now() + 13 * 60 * 60 * 1000);
     expect(await canEdit()).toBe(false);
+  });
+  it('allows separate admin credentials without accepting unknown emails or shared passwords', async () => {
+    const salt = randomBytes(16).toString('hex');
+    const secondPassword = randomBytes(24).toString('hex');
+    const second = {
+      email: 'second@example.test',
+      passwordHash: `${salt}:${scryptSync(secondPassword, salt, 32).toString('hex')}`,
+    };
+    vi.stubEnv('SONLUZ_ADDITIONAL_ADMINS', JSON.stringify([second]));
+    expect(authConfigured()).toBe(true);
+    expect(
+      await verifyAdminCredentials(' EDITOR@EXAMPLE.TEST ', password)
+    ).toEqual({ email: 'editor@example.test', passwordHash: hash });
+    expect(
+      await verifyAdminCredentials(' SECOND@EXAMPLE.TEST ', secondPassword)
+    ).toEqual(second);
+    expect(await verifyAdminCredentials(second.email, password)).toBeNull();
+    expect(
+      await verifyAdminCredentials('editor@example.test', secondPassword)
+    ).toBeNull();
+    expect(
+      await verifyAdminCredentials('outsider@example.test', password)
+    ).toBeNull();
+    expect(await verifyAdminCredentials(second.email, 'wrong')).toBeNull();
+  });
+  it('revokes only the changed or removed admin and binds sessions to their email', async () => {
+    const second = { email: 'second@example.test', passwordHash: hash };
+    vi.stubEnv('SONLUZ_ADDITIONAL_ADMINS', JSON.stringify([second]));
+    const primary = await editorSession();
+    primary.email = 'editor@example.test';
+    primary.version = sessionVersion({
+      email: primary.email,
+      passwordHash: hash,
+    });
+    await primary.save();
+    const primaryCookie = state.jar.get('sonluz-editor')!;
+    const secondary = await editorSession();
+    secondary.email = second.email;
+    secondary.version = sessionVersion(second);
+    await secondary.save();
+    const secondCookie = state.jar.get('sonluz-editor')!;
+    expect(await canEdit()).toBe(true);
+    vi.stubEnv(
+      'SONLUZ_ADMIN_PASSWORD_HASH',
+      hash.replace(/^./, hash[0] === 'a' ? 'b' : 'a')
+    );
+    expect(await canEdit()).toBe(true);
+    state.jar.set('sonluz-editor', primaryCookie);
+    expect(await canEdit()).toBe(false);
+    vi.stubEnv('SONLUZ_ADMIN_PASSWORD_HASH', hash);
+    expect(await canEdit()).toBe(true);
+    vi.stubEnv(
+      'SONLUZ_ADDITIONAL_ADMINS',
+      JSON.stringify([
+        {
+          ...second,
+          passwordHash: hash.replace(/^./, hash[0] === 'a' ? 'b' : 'a'),
+        },
+      ])
+    );
+    expect(await canEdit()).toBe(true);
+    state.jar.set('sonluz-editor', secondCookie);
+    expect(await canEdit()).toBe(false);
+    vi.stubEnv('SONLUZ_ADDITIONAL_ADMINS', JSON.stringify([second]));
+    expect(await canEdit()).toBe(true);
+    const mismatched = await editorSession();
+    mismatched.email = primary.email;
+    await mismatched.save();
+    expect(await canEdit()).toBe(false);
+    state.jar.set('sonluz-editor', secondCookie);
+    vi.stubEnv('SONLUZ_ADDITIONAL_ADMINS', '[]');
+    expect(await canEdit()).toBe(false);
+    state.jar.set('sonluz-editor', primaryCookie);
+    expect(await canEdit()).toBe(true);
+  });
+  it.each([
+    'invalid JSON',
+    '{}',
+    'null',
+    '[null]',
+    JSON.stringify([{ email: 'second@example.test' }]),
+    JSON.stringify([
+      { email: 'invalid', passwordHash: 'a'.repeat(32) + ':' + 'b'.repeat(64) },
+    ]),
+    JSON.stringify([{ email: 'second@example.test', passwordHash: 'invalid' }]),
+    JSON.stringify([
+      {
+        email: ' EDITOR@EXAMPLE.TEST ',
+        passwordHash: 'a'.repeat(32) + ':' + 'b'.repeat(64),
+      },
+    ]),
+    JSON.stringify([
+      {
+        email: 'second@example.test',
+        passwordHash: 'a'.repeat(32) + ':' + 'b'.repeat(64),
+      },
+      {
+        email: ' SECOND@EXAMPLE.TEST ',
+        passwordHash: 'a'.repeat(32) + ':' + 'b'.repeat(64),
+      },
+    ]),
+  ])(
+    'fails closed on invalid or duplicate additional admins (%s)',
+    async (value) => {
+      vi.stubEnv('SONLUZ_ADDITIONAL_ADMINS', value);
+      expect(authConfigured()).toBe(false);
+      expect(await canEdit()).toBe(false);
+      expect(
+        await verifyAdminCredentials('editor@example.test', password)
+      ).toBeNull();
+      await expect(editorSession()).rejects.toMatchObject({ status: 503 });
+    }
+  );
+  it('requires a valid primary administrator even when another admin is configured', () => {
+    vi.stubEnv(
+      'SONLUZ_ADDITIONAL_ADMINS',
+      JSON.stringify([{ email: 'second@example.test', passwordHash: hash }])
+    );
+    vi.stubEnv('SONLUZ_ADMIN_EMAIL', 'invalid');
+    expect(authConfigured()).toBe(false);
   });
   it('cannot activate the local bypass in production or against a remote Worker', async () => {
     expect(localCmsPreview()).toBe(false);

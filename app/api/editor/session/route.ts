@@ -5,7 +5,7 @@ import {
   requireEditor,
   requireSameOrigin,
   sessionVersion,
-  verifyPassword,
+  verifyAdminCredentials,
 } from '@/lib/server/editor-auth';
 import { cmsJson } from '@/lib/server/cms';
 import { api, json } from '@/lib/server/api';
@@ -39,18 +39,12 @@ export const POST = (request: Request) =>
         key: createHash('sha256').update(email).digest('hex'),
       }),
     });
-    const valid = await verifyPassword(
-      body.password,
-      process.env.SONLUZ_ADMIN_PASSWORD_HASH!
-    );
-    if (
-      !valid ||
-      email !== process.env.SONLUZ_ADMIN_EMAIL?.trim().toLowerCase()
-    )
+    const admin = await verifyAdminCredentials(email, body.password);
+    if (!admin)
       throw new HttpError(401, 'El correo o la contraseña no son correctos.');
     const session = await editorSession();
-    session.email = email;
-    session.version = sessionVersion();
+    session.email = admin.email;
+    session.version = sessionVersion(admin);
     await session.save();
     return json({ signedIn: true });
   });
